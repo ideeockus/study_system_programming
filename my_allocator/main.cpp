@@ -123,6 +123,22 @@ border_marker* get_next_seg(border_marker* bm_head) {
     return next_head;
 }
 
+border_marker* get_prev_seg(border_marker* bm_head) {
+    unsigned char* buf_ptr = (unsigned char*)bm_head;
+    unsigned char* prev_tail_ptr = buf_ptr - sizeof(border_marker);
+
+    // check for buf bounds
+    if (prev_tail_ptr < mybuf) {
+        return NULL;
+    }
+
+    // border_marker* prev_tail = (border_marker*)prev_tail_ptr;
+    unsigned char* prev_head_ptr = prev_tail_ptr - ((border_marker*)prev_tail_ptr)->size - sizeof(border_marker);
+
+    border_marker* prev_head = (border_marker*)prev_head_ptr;
+    return prev_head;
+}
+
 void merge_segs(border_marker* start_bm_head, border_marker* end_bm_head) {
     border_marker* end_bm_tail = get_tail_by_head(start_bm_head);
 
@@ -168,8 +184,19 @@ border_marker* merge_nearest_segs(border_marker* bm_head) {
     // border_marker* very_first_bm_head = (border_marker*)mybuf;
 
     border_marker* next_bm_head = get_next_seg(bm_head);
-    
 
+    if (next_bm_head->free == true) {
+        merge_segs(bm_head, next_bm_head);
+    }
+
+    border_marker* prev_bm_head = get_prev_seg(bm_head);
+
+    if (prev_bm_head->free == true) {
+        merge_segs(prev_bm_head, bm_head);
+        bm_head = prev_bm_head;
+    }
+
+    return bm_head;
 }
 
 
