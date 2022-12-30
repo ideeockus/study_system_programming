@@ -69,7 +69,7 @@ int main()
     print_mybuf_dump_colored();
 
 
-    // myfree(a);
+    myfree(a);
     // myfree(b);
     myfree(c);
     myfree(b);
@@ -204,8 +204,7 @@ void merge_segs(border_marker* start_bm_head, border_marker* end_bm_head) {
     border_marker* end_bm_tail = get_tail_by_head(end_bm_head);
 
     // size of merged segment
-    // ??? recheck later
-    size_t new_seg_size = (unsigned char*)end_bm_tail - (unsigned char*)start_bm_head + sizeof(border_marker);
+    size_t new_seg_size = start_bm_head->size + end_bm_head->size + 2*sizeof(border_marker);
     printf("new seg size: %d\n", new_seg_size);
     start_bm_head->size = new_seg_size;
     end_bm_tail->size = new_seg_size;
