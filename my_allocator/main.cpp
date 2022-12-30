@@ -14,8 +14,12 @@ struct border_marker {
     size_t size;
 };
 
+border_marker* get_next_seg(border_marker* bm_head);
+border_marker* get_tail_by_head(border_marker* bm_head);
+
 // test code
 void print_mybuf_dump();
+void print_mybuf_dump_colored();
 void print_border_marker(border_marker* bm);
 
 int main()
@@ -26,7 +30,7 @@ int main()
     void* buf = malloc(size);
     mysetup(buf, size);
 
-    print_mybuf_dump();
+    print_mybuf_dump_colored();
 
     void* a = myalloc(100);
     void* b = myalloc(50);
@@ -62,23 +66,62 @@ int main()
     // printf("\n");
 
 
-    print_mybuf_dump();
+    print_mybuf_dump_colored();
+
+
+    // myfree(a);
+    // myfree(b);
+    myfree(c);
+    myfree(b);
+
+    print_mybuf_dump_colored();
 
     return 0;
 }
 
 void print_mybuf_dump() {
-    // printf("mybuf dump:\n");
-    // for (size_t i=0;i<=mysize;i++) {
-    //     printf("%x", *((char*)mybuf+i));
-    // }
-    // printf("\n");
-
+    // without color
     printf("mybuf dump:\n");
     for (size_t i=0;i<=mysize;i++) {
-        printf("%x", *((char*)mybuf+i));
+        printf("%x", *((unsigned char*)mybuf+i));
         if (i>1 && i%50 == 0) {
-            printf("\t%d\n", i);
+            printf("\t%d", i);
+            printf("\t%p\n", (unsigned char*)mybuf+i);
+        }
+    }
+    printf("\n");
+}
+
+void print_mybuf_dump_colored() {
+    void* head_start_pos = mybuf;
+    void* head_end_pos = head_start_pos + sizeof(border_marker);
+    void* tail_start_pos = get_tail_by_head((border_marker*)head_start_pos);
+    void* tail_end_pos = tail_start_pos + sizeof(border_marker);
+
+    printf("\033[1mmybuf dump:\033[0m\n");
+    for (size_t i=0;i<=mysize;i++) {
+        void* ptr = mybuf + i;
+
+        // add ANSI color seqs to output
+        if (ptr == head_start_pos) {
+            printf("\033[31m");
+            tail_start_pos = get_tail_by_head((border_marker*)head_start_pos);
+            tail_end_pos = tail_start_pos + sizeof(border_marker);
+        } else if (ptr == tail_start_pos) {
+            printf("\033[34m");
+        } else if (ptr == head_end_pos || ptr == tail_end_pos) {
+            printf("\033[0m");
+
+            head_start_pos = (void*)get_next_seg((border_marker*)head_start_pos);
+            if (head_start_pos == NULL) {
+                head_start_pos = mybuf;
+            }
+            head_end_pos = head_start_pos + sizeof(border_marker);
+        }
+        printf("%x", *((unsigned char*)ptr));
+        if (i>1 && i%50 == 0) {
+            printf("\t%d", i);
+            printf("\t%p\n", ptr);
         }
     }
     printf("\n");
@@ -131,7 +174,7 @@ border_marker* get_next_seg(border_marker* bm_head) {
     unsigned char* next_head_ptr = buf_ptr + 2*sizeof(border_marker) + bm_head->size;
     
     // check for buf bounds
-    if (next_head_ptr > mybuf + mysize) {
+    if (next_head_ptr + sizeof(border_marker) > mybuf + mysize) {
         return NULL;
     }
 
@@ -156,11 +199,14 @@ border_marker* get_prev_seg(border_marker* bm_head) {
 }
 
 void merge_segs(border_marker* start_bm_head, border_marker* end_bm_head) {
-    border_marker* end_bm_tail = get_tail_by_head(start_bm_head);
+    printf("merging segments: %p  and %p\n", start_bm_head, end_bm_head);
+
+    border_marker* end_bm_tail = get_tail_by_head(end_bm_head);
 
     // size of merged segment
     // ??? recheck later
-    size_t new_seg_size = (unsigned char*)end_bm_tail - (unsigned char*)start_bm_head;
+    size_t new_seg_size = (unsigned char*)end_bm_tail - (unsigned char*)start_bm_head + sizeof(border_marker);
+    printf("new seg size: %d\n", new_seg_size);
     start_bm_head->size = new_seg_size;
     end_bm_tail->size = new_seg_size;
 }
@@ -208,13 +254,15 @@ border_marker* merge_nearest_segs(border_marker* bm_head) {
 
     border_marker* next_bm_head = get_next_seg(bm_head);
 
-    if (next_bm_head->free == true) {
+    if (next_bm_head!=NULL && next_bm_head->free == true) {
+        // printf("merging nearest segs (next): %p  and %p\n", bm_head, next_bm_head);
         merge_segs(bm_head, next_bm_head);
     }
 
     border_marker* prev_bm_head = get_prev_seg(bm_head);
 
-    if (prev_bm_head->free == true) {
+    if (prev_bm_head!=NULL && prev_bm_head->free == true) {
+        // printf("merging nearest segs (prev): %p  and %p\n", prev_bm_head, bm_head);
         merge_segs(prev_bm_head, bm_head);
         bm_head = prev_bm_head;
     }
@@ -232,8 +280,7 @@ void mysetup(void *buf, size_t size) {
 }
 
 // Функция аллокации
-void* myalloc(size_t size)
-{
+void* myalloc(size_t size) {
     // border_marker bm = border_marker { 1, 100 };
     // std::memcpy(mybuf, &bm, sizeof(border_marker));
     printf("allocation %d\n", size);
@@ -256,17 +303,26 @@ void* myalloc(size_t size)
     if (seg_bm_head == NULL) {
         printf("allocation fault");
     }
-    print_mybuf_dump();
+    print_mybuf_dump_colored();
 
 
     // print_border_marker(bm_head);
+    void* seg_ptr = (unsigned char*)seg_bm_head + sizeof(border_marker);
 
-    return seg_bm_head;
+    return seg_ptr;
 }
 
 // Функция освобождения
-void myfree(void *p)
-{}
+void myfree(void* p) {
+    unsigned char* bm_head_ptr = (unsigned char*)p - sizeof(border_marker);
+
+    border_marker* bm_head = merge_nearest_segs((border_marker*)bm_head_ptr);
+    // border_marker* bm_head = (border_marker*)bm_head_ptr;
+    border_marker* bm_tail = get_tail_by_head(bm_head);
+
+    bm_head->free = true;
+    bm_tail->free = true;
+}
 
 /*
 1) структура для граничного маркера
