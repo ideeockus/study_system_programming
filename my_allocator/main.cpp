@@ -1,5 +1,5 @@
 #include <cstdlib>
-#include <cstring>
+// #include <cstring>
 #include <cstdio>
 
 void mysetup(void *buf, std::size_t size);
@@ -29,6 +29,11 @@ int main()
     print_mybuf_dump();
 
     void* a = myalloc(100);
+    void* b = myalloc(50);
+    void* c = myalloc(10);
+
+    printf("a = %p\nb = %p\nc = %p\n", a, b, c);
+    // printf("sizeof border_marker - %d", sizeof(border_marker));
 
 
     // char* a = (char*)myalloc(100);
@@ -63,9 +68,18 @@ int main()
 }
 
 void print_mybuf_dump() {
+    // printf("mybuf dump:\n");
+    // for (size_t i=0;i<=mysize;i++) {
+    //     printf("%x", *((char*)mybuf+i));
+    // }
+    // printf("\n");
+
     printf("mybuf dump:\n");
     for (size_t i=0;i<=mysize;i++) {
         printf("%x", *((char*)mybuf+i));
+        if (i>1 && i%50 == 0) {
+            printf("\t%d\n", i);
+        }
     }
     printf("\n");
 }
@@ -102,6 +116,8 @@ border_marker* init_seg(void* buf, size_t size) {
     border_marker* bm_tail = (border_marker*)((unsigned char*)buf + size - sizeof(border_marker));
     bm_tail->free = 1;
     bm_tail->size = seg_size;
+
+    return bm_head;
 }
 
 border_marker* get_tail_by_head(border_marker* bm_head) {
@@ -160,20 +176,27 @@ border_marker* try_use_seg(border_marker* bm_head, size_t use_size) {
     border_marker* bm_tail = get_tail_by_head(bm_head);
 
     if (remaining_size <= 2*sizeof(border_marker)) {
-        // allocate entire segment
+        // allocate entire segment+
         bm_head->free = false;
         bm_tail->free = false;
+
+        printf("hoba\n");
 
         return bm_head;
     }
 
     // otherwise divide segment
     unsigned char* bm_head_ptr = (unsigned char*)bm_head;
-    border_marker* new_seg = init_seg(bm_head_ptr, use_size);
+    // 2* sizeof ???
+    border_marker* new_seg = init_seg(bm_head_ptr, use_size + 2*sizeof(border_marker));
 
-    unsigned char* next_bm_head_ptr = bm_head_ptr + use_size + sizeof(border_marker);
-    size_t next_seg_size = remaining_size - 2*sizeof(border_marker);
-    init_seg(next_bm_head_ptr, next_seg_size);
+    unsigned char* next_bm_head_ptr = bm_head_ptr + use_size + 2*sizeof(border_marker);
+    // size_t next_seg_size = remaining_size - 2*sizeof(border_marker);
+    init_seg(next_bm_head_ptr, remaining_size);
+
+    // border_marker* next_bm_head = (border_marker*)next_bm_head_ptr;
+    new_seg->free = false;
+    get_tail_by_head(new_seg)->free=false;
 
     return new_seg;
 }
@@ -204,6 +227,8 @@ border_marker* merge_nearest_segs(border_marker* bm_head) {
 void mysetup(void *buf, size_t size) {
     mybuf = buf;
     mysize = size;
+
+    init_seg(buf, size);
 }
 
 // Функция аллокации
@@ -211,11 +236,32 @@ void* myalloc(size_t size)
 {
     // border_marker bm = border_marker { 1, 100 };
     // std::memcpy(mybuf, &bm, sizeof(border_marker));
+    printf("allocation %d\n", size);
+
+    // very first bm_head
+    border_marker* cur_bm_head = (border_marker*)mybuf;
+    printf("cur_bm_head: {free: %d; size: %d}\n",
+        cur_bm_head->free, cur_bm_head->size);
+    while(cur_bm_head->free == false || cur_bm_head->size < size) {
+        printf("seg %d\n in use, next", (unsigned char*)cur_bm_head);
+        cur_bm_head = get_next_seg(cur_bm_head);
+    }
+
+    if (cur_bm_head == NULL) {
+        return NULL;
+    }
+
+    printf("seg %p is ok\n", cur_bm_head);
+    border_marker* seg_bm_head = try_use_seg(cur_bm_head, size);
+    if (seg_bm_head == NULL) {
+        printf("allocation fault");
+    }
+    print_mybuf_dump();
 
 
     // print_border_marker(bm_head);
 
-    return mybuf;
+    return seg_bm_head;
 }
 
 // Функция освобождения
