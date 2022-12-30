@@ -36,8 +36,8 @@ int main()
 
     void* a = myalloc(100);
     void* b = myalloc(50);
-    void* c = myalloc(10);
-    void* d = myalloc(500);
+    void* c = myalloc(200);
+    void* d = myalloc(5);
 
     printf("a = %p\nb = %p\nc = %p\n", a, b, c);
     printf("d = %p\n", d);
@@ -241,7 +241,7 @@ void* myalloc(size_t size) {
 
     // very first bm_head
     border_marker* cur_bm_head = (border_marker*)mybuf;
-    while(cur_bm_head->free == false || cur_bm_head->size < size) {
+    while(cur_bm_head != NULL && (cur_bm_head->free == false || cur_bm_head->size < size)) {
         cur_bm_head = get_next_seg(cur_bm_head);
     }
 
