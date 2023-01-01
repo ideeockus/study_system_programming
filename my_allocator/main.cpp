@@ -34,18 +34,21 @@ int main()
 
     print_mybuf_dump_colored();
 
-    void* a = myalloc(100);
-    void* b = myalloc(50);
-    void* c = myalloc(200);
-    void* d = myalloc(5);
-
-    printf("a = %p\nb = %p\nc = %p\n", a, b, c);
-    printf("d = %p\n", d);
+    void* a = myalloc(10);
     print_mybuf_dump_colored();
+
+    void* b = myalloc(200);
+    print_mybuf_dump_colored();
+    // void* c = myalloc(200);
+    // void* d = myalloc(5);
+
+    // printf("a = %p\nb = %p\nc = %p\n", a, b, c);
+    // printf("d = %p\n", d);
+    // print_mybuf_dump_colored();
 
 
     myfree(a);
-    myfree(c);
+    // myfree(c);
     myfree(b);
 
     print_mybuf_dump_colored();
@@ -254,7 +257,6 @@ void* myalloc(size_t size) {
         printf("allocation fault");
         return NULL;
     }
-    print_mybuf_dump_colored();
 
     void* seg_ptr = (unsigned char*)seg_bm_head + sizeof(border_marker);
 
@@ -264,6 +266,7 @@ void* myalloc(size_t size) {
 // Функция освобождения
 void myfree(void* p) {
     unsigned char* bm_head_ptr = (unsigned char*)p - sizeof(border_marker);
+    printf("free %p\n", bm_head_ptr);
 
     border_marker* bm_head = merge_nearest_segs((border_marker*)bm_head_ptr);
     border_marker* bm_tail = get_tail_by_head(bm_head);
