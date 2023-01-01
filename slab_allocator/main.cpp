@@ -264,7 +264,8 @@ int main() {
     printf("%p %p %p\n\n", a, b, c);
 
     for(int i = 0;i<cache->slab_objects*2;i++) {
-        cache_alloc(cache);
+        void* p = cache_alloc(cache);
+        cache_free(cache, p);
     }
     print_cache_info(cache);
     printf("\n");
