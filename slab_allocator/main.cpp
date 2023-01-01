@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <cstdio>
+#include <cstdint>
 
 /**
  * Эти две функции вы должны использовать для аллокации
@@ -78,7 +79,7 @@ void cache_setup(struct cache *cache, size_t object_size) {
 
     // размер должен быть до 4Mib
     size_t slab_mem = 4096 * 1 << i;
-    size_t slab_objects = (slab_mem - sizeof(slab_header)) / object_size;
+    size_t slab_objects = (slab_mem - sizeof(slab_header)) / (object_size + sizeof(slab_object));
 
     cache->object_size = object_size;
     cache->slab_order = i;
@@ -86,10 +87,10 @@ void cache_setup(struct cache *cache, size_t object_size) {
 }
 
 
-void release_slab_list(void* slab_list) {
+void release_slab_list(slab_header* slab_list) {
     slab_header* slab = slab_list;
     while(slab) {
-        slab_to_release = slab;
+        slab_header* slab_to_release = slab;
         slab = slab->next; 
         free(slab_to_release);
     }
@@ -132,6 +133,7 @@ void *cache_alloc(struct cache *cache) {
 
     if (partially_busy_slab != NULL) {
         // можно аллоцировать в SLAB'е из partially_busy
+        // printf("alloc to partially_busy slab: %p\n", partially_busy_slab);
         uint8_t* ptr = (uint8_t*)(partially_busy_slab->free_block) + sizeof(slab_object);
 
         partially_busy_slab->free_block = partially_busy_slab->free_block->next;
@@ -143,17 +145,17 @@ void *cache_alloc(struct cache *cache) {
             cache->partially_busy = partially_busy_slab->next;
 
             // вставить в начало totally_busy
-            partially_busy_slab->next = cache->totally_busy->next;
-            cache->totally_busy->next = partially_busy_slab;
-            partially_busy_slab->prev = NULL
-
-
+            partially_busy_slab->next = cache->totally_busy;
+            cache->totally_busy = partially_busy_slab;
+            partially_busy_slab->prev = NULL;
         }
         return ptr;
 
     } else /*if (partially_busy_slab == NULL)*/ {
         // частично свободных нету, значит нужно выделять новый SLAB
-        slab_header* slab = alloc_slab(cache->slab_order);
+        printf("alloc to new slab\n");
+
+        slab_header* slab = (slab_header*)alloc_slab(cache->slab_order);
 
         // инициализация нового SLAB'а
         slab->free_slabs = cache->slab_objects-1;
@@ -166,11 +168,11 @@ void *cache_alloc(struct cache *cache) {
 
         // нужно разбить новый SLAB на блоки
         uint8_t* slab_block_ptr = (uint8_t*)slab + sizeof(slab_header);
-        slab_object slab_block = ((slab_object*)slab_block_ptr);
+        slab_object* slab_block = ((slab_object*)slab_block_ptr);
         slab->free_block = slab_block;
         for(int i = 0;i < cache->slab_objects; i++){
-            slab_block->next = slab_block_ptr + sizeof(slab_object) + cache->object_size;
-            slab_block_ptr = slab_block->next;
+            slab_block->next = (slab_object*)(slab_block_ptr + sizeof(slab_object) + cache->object_size);
+            slab_block_ptr = (uint8_t*)slab_block->next;
             slab_block = ((slab_object*)slab_block_ptr);
         }
 
@@ -191,7 +193,7 @@ void *cache_alloc(struct cache *cache) {
  **/
 void cache_free(struct cache *cache, void *ptr) {
     uint8_t* slab_block_ptr = (uint8_t*)ptr - sizeof(slab_object);
-    uint8_t* slab_ptr = slab_block_ptr &~(1<<i - 1);
+    uint8_t* slab_ptr = (uint8_t*)((uintptr_t)slab_block_ptr & ~(1<<cache->slab_order - 1));
 
     slab_object* slab_block = (slab_object*)slab_block_ptr;
     slab_header* slab = (slab_header*)slab_ptr;
@@ -230,12 +232,66 @@ void cache_shrink(struct cache *cache) {
 
 
 // test code
+void print_cache_info(cache* cache);
+void print_slab_list(slab_header* slab_list);
+void print_slab_info(slab_header* slab);
+
 int main() {
-    
+    // printf("start tests\n");
+    struct cache* cache = (struct cache*)malloc(sizeof(struct cache));
+    cache_setup(cache, 500);
+
+    print_cache_info(cache);
+
+    void* a = cache_alloc(cache);
+    void* b = cache_alloc(cache);
+    void* c = cache_alloc(cache);
+    // printf("a: %p", a);
+    cache_free(cache, a);
+
+    printf("%p %p %p\n\n", a, b, c);
+    print_cache_info(cache);
+    printf("\n");
+
+    // for(int i = 0;i<cache->slab_objects*2;i++) {
+    //     cache_alloc(cache);
+    // }
+    print_cache_info(cache);
+
+    cache_release(cache);
+
     
     return 0;
 }
 
+void print_cache_info(cache* cache) {
+    printf("cache addr: %p\n", cache);
+    printf("object_size: %d\n", cache->object_size);
+    printf("slab_order: %d\n", cache->slab_order);
+    printf("slab_objects: %d\n", cache->slab_objects);
+    printf("lists:\n");
+    printf("\ttotally_free:\n");
+    print_slab_list(cache->totally_free);
+    printf("\tpartially_busy:\n");
+    print_slab_list(cache->partially_busy);
+    printf("\ttotally_busy:\n");
+    print_slab_list(cache->totally_busy);
+}
+
+void print_slab_list(slab_header* slab_list) {
+    slab_header* slab = slab_list;
+    while(slab) {
+        print_slab_info(slab);
+        slab = slab->next;
+    }
+}
+
+void print_slab_info(slab_header* slab) {
+    printf("slab addr: %p\n", slab);
+    printf("next slab addr: %p\n", slab->next);
+    printf("free_slabs: %d\n", slab->free_slabs);
+    printf("free_block: %p\n", slab->free_block);
+}
 
 
 void *alloc_slab(int order) {
