@@ -42,9 +42,9 @@ struct slab_header {
  * сохранить в этой структуре.
  **/
 struct cache {
-    slab_header* totally_free; /* список пустых SLAB-ов для поддержки cache_shrink */
-    slab_header* partially_busy; /* список частично занятых SLAB-ов */
-    slab_header* totally_busy; /* список заполненых SLAB-ов */
+    slab_header totally_free; /* список пустых SLAB-ов для поддержки cache_shrink */
+    slab_header partially_busy; /* список частично занятых SLAB-ов */
+    slab_header totally_busy; /* список заполненых SLAB-ов */
 
     size_t object_size; /* размер аллоцируемого объекта */
     int slab_order; /* используемый размер SLAB-а */
@@ -64,9 +64,10 @@ void cache_setup(struct cache *cache, size_t object_size) {
     /* Реализуйте эту функцию. */
     int min_slab_objects = 2 << 7;
 
-    cache->totally_free = NULL;
-    cache->partially_busy = NULL;
-    cache->totally_busy = NULL;
+    // служебные хедеры, для упрощения работы со списком
+    cache->totally_free = {0, NULL, NULL, NULL};
+    cache->partially_busy = {0, NULL, NULL, NULL};
+    cache->totally_busy = {0, NULL, NULL, NULL};
 
     // предварительный размер SLAB'а
     size_t slab_estimated_mem = (sizeof(slab_object) + object_size) * min_slab_objects + sizeof(slab_header);
@@ -90,11 +91,27 @@ void cache_setup(struct cache *cache, size_t object_size) {
 void release_slab_list(slab_header* slab_list) {
     printf("releasing list %p\n", slab_list);
     slab_header* slab = slab_list;
+    if(slab && slab->prev) slab->prev->next = NULL;
     while(slab) {
         slab_header* slab_to_release = slab;
         slab = slab->next; 
         free(slab_to_release);
     }
+}
+
+void move_slab(slab_header* slab, slab_header* list) {
+    printf("moving slab %p to %p\n", slab, list);
+    // обновить данные соседей
+    if (slab->prev) slab->prev->next = slab->next;
+    if (slab->next) slab->next->prev = slab->prev;
+
+    // обновить данные самого SLAB'а
+    slab->next = list->next;
+    slab->prev = list;
+
+    // обновить данные новых соседей
+    if(list->next) list->next->prev = slab;
+    list->next = slab;
 }
 
 /**
@@ -112,9 +129,9 @@ void cache_release(struct cache *cache) {
     //     free(slab);
     //     slab = cache->totally_free;
     // }
-    release_slab_list(cache->totally_free);
-    release_slab_list(cache->partially_busy);
-    release_slab_list(cache->totally_busy);
+    release_slab_list(cache->totally_free.next);
+    release_slab_list(cache->partially_busy.next);
+    release_slab_list(cache->totally_busy.next);
 }
 
 
@@ -127,7 +144,7 @@ void cache_release(struct cache *cache) {
  **/
 void *cache_alloc(struct cache *cache) {
     // сначала попробовать аллоцировать из partially_busy
-    slab_header* partially_busy_slab = cache->partially_busy;
+    slab_header* partially_busy_slab = cache->partially_busy.next;
     // while(partially_busy_slab != NULL && partially_busy_slab->free_slabs == 0) {
     //     partially_busy_slab->next;
     // }
@@ -143,13 +160,18 @@ void *cache_alloc(struct cache *cache) {
         // нужно ли перенести в список totally_busy
         if (partially_busy_slab->free_slabs == 0) {
             // убрать из списка partially_busy
-            cache->partially_busy = partially_busy_slab->next;
+            move_slab(partially_busy_slab, &cache->totally_busy);
+            // if (partially_busy_slab->prev) {
+            //     partially_busy_slab->prev->next = partially_busy_slab->next;
+            // } else {
+            //     cache->partially_busy = partially_busy_slab->next;
+            // }
 
-            // вставить в начало totally_busy
-            if (cache->totally_busy) cache->totally_busy->prev = partially_busy_slab;
-            partially_busy_slab->next = cache->totally_busy;
-            cache->totally_busy = partially_busy_slab;
-            partially_busy_slab->prev = NULL;
+            // // вставить в начало totally_busy
+            // if (cache->totally_busy) cache->totally_busy->prev = partially_busy_slab;
+            // partially_busy_slab->next = cache->totally_busy;
+            // cache->totally_busy = partially_busy_slab;
+            // partially_busy_slab->prev = NULL;
         }
         return ptr;
 
@@ -166,7 +188,8 @@ void *cache_alloc(struct cache *cache) {
         slab->free_block = NULL;
 
         // помещение нового SLAB'а в partially_busy
-        cache->partially_busy = slab;
+        move_slab(slab, &cache->partially_busy);
+        // cache->partially_busy = slab;
 
         // нужно разбить новый SLAB на блоки
         uint8_t* slab_block_ptr = (uint8_t*)slab + sizeof(slab_header);
@@ -186,7 +209,6 @@ void *cache_alloc(struct cache *cache) {
     }
 
 }
-
 
 /**
  * Функция освобождения памяти назад в кеширующий аллокатор.
@@ -212,20 +234,22 @@ void cache_free(struct cache *cache, void *ptr) {
     // в какой из списков нужно поставить SLAB
     if (slab->free_slabs >= cache->slab_objects) {
         // из partially_busy в totally_free
-        if (cache->totally_free) cache->totally_free->prev = slab;
-        slab->next = cache->totally_free;
-        slab->prev = NULL;
-        cache->totally_free = slab;
+        // if (cache->totally_free) cache->totally_free->prev = slab;
+        // slab->next = cache->totally_free;
+        // slab->prev = NULL;
+        // cache->totally_free = slab;
+        move_slab(slab, &cache->totally_free);
     } else if(slab->free_slabs - 1 == 0) {
         // из totally_busy в partially_busy
-        if (slab->prev) {
-            slab->prev->next = slab->next;
-        } else {
-            cache->totally_busy = slab->next;
-        }
-        if (cache->partially_busy) cache->partially_busy->prev = slab;
-        slab->next = cache->partially_busy;
-        cache->partially_busy = slab;
+        // if (slab->prev) {
+        //     slab->prev->next = slab->next;
+        // } else {
+        //     cache->totally_busy = slab->next;
+        // }
+        // if (cache->partially_busy) cache->partially_busy->prev = slab;
+        // slab->next = cache->partially_busy;
+        // cache->partially_busy = slab;
+        move_slab(slab, &cache->partially_busy);
     }
 
 }
@@ -239,7 +263,7 @@ void cache_free(struct cache *cache, void *ptr) {
  * его не обязательно.
  **/
 void cache_shrink(struct cache *cache) {
-    release_slab_list(cache->totally_free);
+    release_slab_list(cache->totally_free.next);
 }
 
 
@@ -262,18 +286,40 @@ int main() {
     // printf("a: %p", a);
 
     printf("%p %p %p\n\n", a, b, c);
-
-    for(int i = 0;i<cache->slab_objects*2;i++) {
-        void* p = cache_alloc(cache);
-        cache_free(cache, p);
-    }
     print_cache_info(cache);
     printf("\n");
 
-    cache_free(cache, a);
+    for(int i = 0;i<cache->slab_objects*4;i++) {
+        void* p = cache_alloc(cache);
+        // ptrs.push_back((uintptr_t)p);
+        // cache_free(cache, p);
+    }
+
+    slab_header* slab_to_free = cache->totally_busy.next;
+    
+    while(slab_to_free) {
+        uint8_t* ptr = (uint8_t*)slab_to_free + sizeof(slab_header);
+        for(int i = 0;i<cache->slab_objects;i++) {
+            ptr += sizeof(slab_object);
+            cache_free(cache, ptr);
+        }
+        slab_to_free = slab_to_free->next;
+    }
+
+
+    print_cache_info(cache);
+    printf("\n");
+
+    // cache_free(cache, a);
+    // cache_free(cache, c);
+    // cache_free(cache, b);
+    cache_shrink(cache);
+
     print_cache_info(cache);
 
     cache_release(cache);
+
+    print_cache_info(cache);
 
     
     return 0;
@@ -286,11 +332,11 @@ void print_cache_info(cache* cache) {
     printf("slab_objects: %d\n", cache->slab_objects);
     printf("lists:\n");
     printf("\ttotally_free:\n");
-    print_slab_list(cache->totally_free);
+    print_slab_list(cache->totally_free.next);
     printf("\tpartially_busy:\n");
-    print_slab_list(cache->partially_busy);
+    print_slab_list(cache->partially_busy.next);
     printf("\ttotally_busy:\n");
-    print_slab_list(cache->totally_busy);
+    print_slab_list(cache->totally_busy.next);
 }
 
 void print_slab_list(slab_header* slab_list) {
@@ -302,8 +348,9 @@ void print_slab_list(slab_header* slab_list) {
 }
 
 void print_slab_info(slab_header* slab) {
-    printf("slab addr: %p\n", slab);
+    printf("\033[1mslab addr\033[0m: %p\n", slab);
     printf("next slab addr: %p\n", slab->next);
+    printf("prev slab addr: %p\n", slab->prev);
     printf("free_slabs: %d\n", slab->free_slabs);
     printf("free_block: %p\n", slab->free_block);
 }
