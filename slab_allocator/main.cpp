@@ -88,18 +88,16 @@ void cache_setup(struct cache *cache, size_t object_size) {
 
 
 void release_slab_list(slab_header* slab_list) {
-    printf("releasing list %p\n", slab_list);
     slab_header* slab = slab_list;
     if(slab && slab->prev) slab->prev->next = NULL;
     while(slab) {
         slab_header* slab_to_release = slab;
         slab = slab->next; 
-        free(slab_to_release);
+        free_slab(slab_to_release);
     }
 }
 
 void move_slab(slab_header* slab, slab_header* list) {
-    printf("moving slab %p to %p\n", slab, list);
     // обновить данные соседей
     if (slab->prev) slab->prev->next = slab->next;
     if (slab->next) slab->next->prev = slab->prev;
@@ -153,8 +151,6 @@ void *cache_alloc(struct cache *cache) {
 
     } else {
         // частично свободных нету, значит нужно выделять новый SLAB
-        printf("alloc to NEW slab\n");
-
         slab_header* slab = (slab_header*)alloc_slab(cache->slab_order);
 
         // инициализация нового SLAB'а
@@ -170,7 +166,7 @@ void *cache_alloc(struct cache *cache) {
         uint8_t* slab_block_ptr = (uint8_t*)slab + sizeof(slab_header);
         slab_object* slab_block = ((slab_object*)slab_block_ptr);
         slab->free_block = slab_block;
-        for(int i = 0;i < cache->slab_objects; i++){
+        for(int i = 0;i < cache->slab_objects; i++) {
             slab_block->next = (slab_object*)(slab_block_ptr + sizeof(slab_object) + cache->object_size);
             slab_block_ptr = (uint8_t*)slab_block->next;
             slab_block = ((slab_object*)slab_block_ptr);
@@ -248,14 +244,13 @@ int main() {
     }
 
     slab_header* slab_to_free = cache->totally_busy.next;
-    
     while(slab_to_free) {
         uint8_t* ptr = (uint8_t*)slab_to_free + sizeof(slab_header);
+        slab_to_free = slab_to_free->next;
         for(int i = 0;i<cache->slab_objects;i++) {
             ptr += sizeof(slab_object);
             cache_free(cache, ptr);
         }
-        slab_to_free = slab_to_free->next;
     }
 
 
@@ -266,12 +261,10 @@ int main() {
     // cache_free(cache, c);
     // cache_free(cache, b);
     cache_shrink(cache);
-
     print_cache_info(cache);
 
-    cache_release(cache);
-
-    print_cache_info(cache);
+    // cache_release(cache);
+    // print_cache_info(cache);
 
     
     return 0;
