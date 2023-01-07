@@ -2,10 +2,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
-#include <vector>
 #include <iterator>
-#include <queue>
 #include <pthread.h>
+#include <unistd.h>
 
 
 pthread_t* my_pthreads_ids;
@@ -13,21 +12,50 @@ bool debug = false;
 int n_threads;
 long max_ms_consumer_sleep;
 
+pthread_mutex_t my_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t my_cond_full = PTHREAD_COND_INITIALIZER, my_cond_empty = PTHREAD_COND_INITIALIZER;
+
+
 void* producer_routine(void* arg) {
     // Wait for consumer to start
     // Read data, loop through each value and update the value,
     // notify consumer, wait for consumer to process
-    char* x = new char;
 
-    std::cin >> *x;
+    // read numbers from stdin
+//    std::vector<int> numbers;
 
-    std::cout << x << std::endl;
+    std::string input;
+    getline(std::cin, input);
+
+    std::istringstream string_stream(input);
+    for (long num; string_stream >> num;) {
+//        std::lock_guard<std::mutex> my_queue_lock_guard(my_mutex);
+        pthread_mutex_lock(&my_mutex);
+        pthread_cond_wait(&my_cond_empty, &my_mutex);
+        my_num = num;
+        pthread_cond_signal(&my_cond_full);
+        pthread_mutex_unlock(&my_mutex);
+//        numbers.push_back(num);
+    }
+
+    // TODO kill interruptor thread
+
+
 }
 
 void* consumer_routine(void* arg) {
     // notify about start
     // for every update issued by producer, read the value and add to sum
     // return pointer to result (for particular consumer)
+    long* my_num = (long*)arg;
+    long local_sum;
+
+    while(1) {
+        pthread_mutex_lock(&my_mutex);
+        pthread_cond_wait(&my_cond_full, &my_mutex);
+        usleep(1000 * max_ms_consumer_sleep);  // TODO add random
+
+    }
 }
 
 void* consumer_interruptor_routine(void* arg) {
@@ -50,7 +78,12 @@ int run_threads() {
         int a = pthread_create(&ptid, NULL, consumer_routine, NULL);
     }
 
-    pthread_join(producer_ptid, NULL);
+    int ret = pthread_join(producer_ptid, NULL);
+    if (ret) {
+        errno = ret;
+        perror("pthread_join");
+        return -1;
+    }
 
     return 0;
 }
@@ -87,15 +120,6 @@ int main(int argc, char** argv) {
     std::cout << "Consumer max sleep (ms): " << max_ms_consumer_sleep << std::endl;
     std::cout << "Debug mode: " << debug << std::endl;
 
-    // read numbers from stdin
-    std::vector<int> numbers;
-
-    std::string input;
-    getline(std::cin, input);
-    std::istringstream string_stream(input);
-    for (int num; string_stream >> num;) {
-        numbers.push_back(num);
-    }
 //    for (auto i:numbers) {
 //        std::cout << i << std::endl;
 //    }
