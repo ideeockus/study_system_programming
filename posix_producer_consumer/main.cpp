@@ -6,13 +6,14 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <atomic>
+#include <random>
 
 int get_tid();
 
 pthread_t* my_pthreads_ids;
 bool debug = false;
 int n_threads;
-long max_ms_consumer_sleep;
+int max_ms_consumer_sleep;
 pthread_key_t cur_tid;
 
 pthread_mutex_t my_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -26,6 +27,15 @@ struct thread_params {
     bool empty_flag = true;
     bool done_flag = false;
 };
+
+int rand_int(int low, int high)
+{
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dis(low, high);
+
+    return dis(gen);
+}
 
 void* producer_routine(void* arg) {
     // Wait for consumer to start
@@ -121,9 +131,10 @@ void* consumer_routine(void* arg) {
         std::cout << "tid " << get_tid() << ": psum " << *local_sum << std::endl;
 //        pthread_cond_signal(&my_cond_empty);
 //        std::cout << "consumer - empty signal sent" << std::endl;
-        std::cout << "consumer " <<  get_tid() <<" - unlocking mutex, sleeping " << 1000 * max_ms_consumer_sleep << std::endl;
+        int sleep_sec = rand_int(0, max_ms_consumer_sleep);
+        std::cout << "consumer " <<  get_tid() <<" - unlocking mutex, sleeping " << 1000 * sleep_sec << std::endl;
         pthread_mutex_unlock(&my_mutex);
-        usleep(1000 * max_ms_consumer_sleep);  // TODO add random
+        usleep(1000 * sleep_sec);
     }
 
     std::cout << "CONSUMER DONE" << std::endl;
@@ -141,10 +152,9 @@ void* consumer_interruptor_routine(void* arg) {
     pthread_mutex_unlock(&my_mutex);
 
     while(true) {
-        //TODO get random thread id
-        int random_thread_to_cancel = 0;
-//        std::cout << "interruptor - cancelling " << random_thread_to_cancel << std::endl;
-//        pthread_cancel(random_thread_to_cancel);
+        pthread_t random_thread_id_to_cancel = my_pthreads_ids[rand_int(2, n_threads+2)];
+        std::cout << "interruptor - cancelling " << random_thread_id_to_cancel << std::endl;
+        pthread_cancel(random_thread_id_to_cancel);
         pthread_testcancel();
     }
 }
