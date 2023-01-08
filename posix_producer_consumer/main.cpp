@@ -116,9 +116,9 @@ void* consumer_interruptor_routine(void* arg) {
 
     while(true) {
         pthread_t random_thread_id_to_cancel = my_pthreads_ids[rand_int(2, n_threads+2)];
+        pthread_testcancel();
         if (random_thread_id_to_cancel == 0) continue;
         pthread_cancel(random_thread_id_to_cancel);
-        pthread_testcancel();
     }
 }
 
@@ -145,12 +145,15 @@ int run_threads() {
         pthread_join(my_pthreads_ids[3 + i], &result_ptr);
         consumers_results[i] = *(long*)result_ptr;
         aggregated_sum += *(long*)result_ptr;
+        delete (long*)result_ptr;
     }
 
     for (int i=0;i<n_threads;i++) {
         std::cout << consumers_results[i] << " ";
     }
     std::cout << std::endl;
+
+    delete[] consumers_results;
 
     pthread_join(my_pthreads_ids[1], NULL);
     pthread_join(my_pthreads_ids[2], NULL);
@@ -159,6 +162,8 @@ int run_threads() {
 //        perror("pthread_join");
 //        return -1;
 //    }
+    delete my_pthreads_ids;
+
     return aggregated_sum;
 }
 
