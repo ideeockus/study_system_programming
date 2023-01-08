@@ -78,7 +78,7 @@ void* consumer_routine(void* arg) {
     // return pointer to result (for particular consumer)
     int last_state, ret;
     struct thread_params* p = (struct thread_params*)arg;
-    long* local_sum = new long;
+    long* local_sum = new long(0);
 
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &last_state);
     pthread_cond_broadcast(&my_cond_consumer_is_ready);
@@ -116,6 +116,7 @@ void* consumer_interruptor_routine(void* arg) {
 
     while(true) {
         pthread_t random_thread_id_to_cancel = my_pthreads_ids[rand_int(2, n_threads+2)];
+        if (random_thread_id_to_cancel == 0) continue;
         pthread_cancel(random_thread_id_to_cancel);
         pthread_testcancel();
     }
@@ -137,14 +138,15 @@ int run_threads() {
     }
 
     long* consumers_results = new long[n_threads];
+    long aggregated_sum = 0;
     for (int i=0;i<n_threads;i++) {
         // collect sums from each consumer
         void* result_ptr = new long;
         pthread_join(my_pthreads_ids[3 + i], &result_ptr);
         consumers_results[i] = *(long*)result_ptr;
+        aggregated_sum += *(long*)result_ptr;
     }
 
-    // print results
     for (int i=0;i<n_threads;i++) {
         std::cout << consumers_results[i] << " ";
     }
@@ -157,8 +159,7 @@ int run_threads() {
 //        perror("pthread_join");
 //        return -1;
 //    }
-
-    return 0;
+    return aggregated_sum;
 }
 
 int get_tid() {
