@@ -105,7 +105,12 @@ void* consumer_routine(void* arg) {
             std::cout << "consumer " <<  get_tid() <<" - wait cond full" << std::endl;
             pthread_cond_wait(&my_cond_full, &my_mutex);
 
-            if (p->done_flag) break;
+
+            if (p->done_flag) {
+                pthread_mutex_unlock(&my_mutex);
+                std::cout << "CONSUMER DONE" << std::endl;
+                return  local_sum;
+            }
         }
 //        pthread_cond_wait(&my_cond_full, &my_mutex);
 //        timespec s = {0, max_ms_consumer_sleep * 1000000};
@@ -203,13 +208,13 @@ int run_threads() {
 int get_tid() {
     // 1 to 3+N thread ID
 //    static int thread_counter = 0;
-    static std::atomic<int> thread_counter = 0;
+    static std::atomic<int> thread_counter = 1;
     void* thread_id_ptr = pthread_getspecific(cur_tid);
 //    std::cout << "get_tid " << thread_id_ptr << std::endl;
     if (thread_id_ptr == NULL) {
-        thread_counter.fetch_add(1);
-        pthread_setspecific(cur_tid, &thread_counter);
-        return thread_counter;
+        int* new_pid = new int(thread_counter.fetch_add(1));
+        pthread_setspecific(cur_tid, new_pid);
+        return *new_pid;
     }
 
 //    std::cout << "debug tid " << *(int*)thread_id_ptr << " " << (int*)thread_id_ptr << " " << thread_id_ptr << std::endl;
