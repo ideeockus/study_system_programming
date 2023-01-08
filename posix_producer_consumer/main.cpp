@@ -22,8 +22,8 @@ pthread_cond_t my_cond_full = PTHREAD_COND_INITIALIZER,
 
 
 struct thread_params {
-    long my_buf;  // producer writes here, consumer reads
-    bool empty_flag = false;
+    long my_num = 0;  // producer writes here, consumer reads
+    bool empty_flag = true;
     bool done_flag = false;
 };
 
@@ -34,7 +34,7 @@ void* producer_routine(void* arg) {
 
     // read numbers from stdin
 //    std::vector<int> numbers;
-    long* my_num = (long*)arg;
+    struct thread_params* p = (struct thread_params*)arg;
 
 //    std::cout << "producer tid: " << get_tid() << std::endl;
 
@@ -53,14 +53,14 @@ void* producer_routine(void* arg) {
     for (long num; string_stream >> num;) {
 //        while (*my_num != -1); // spinlock
 //        pthread_mutex_lock(&my_mutex);
-        *my_num = num;
+        p->my_num = num;
+        p->empty_flag = false;
 //        pthread_cond_signal(&my_cond_full);
         std::cout << "producer - full signal sent & waiting empty" << std::endl;
 //        pthread_cond_wait(&my_cond_empty, &my_mutex);
 //        timespec s = {0, max_ms_consumer_sleep * 1000000};
 //        while (pthread_cond_timedwait(&my_cond_empty, &my_mutex, &s) && *my_num != -1)
-        while (*my_num != -1)
-        {
+        while (!p->empty_flag) {
 //            std::cout << *my_num << std::endl;
             pthread_cond_signal(&my_cond_full);
             pthread_cond_wait(&my_cond_empty, &my_mutex);
@@ -70,9 +70,13 @@ void* producer_routine(void* arg) {
 //        pthread_mutex_unlock(&my_mutex);
     }
     std::cout << "producer - unlocking mutex" << std::endl;
+    p->done_flag = true;
+    pthread_cond_broadcast(&my_cond_full); // wakeup consumer threads, so they can return calculations
     pthread_mutex_unlock(&my_mutex);
 
-    // TODO kill interruptor thread
+    pthread_cancel(my_pthreads_ids[2]);
+    std::cout << "PRODUCER DONE" << std::endl;
+    return NULL;
 
 
 }
@@ -82,7 +86,8 @@ void* consumer_routine(void* arg) {
     // for every update issued by producer, read the value and add to sum
     // return pointer to result (for particular consumer)
     int last_state, ret;
-    long* my_num = (long*)arg;
+    struct thread_params* p = (struct thread_params*)arg;
+//    long* my_num = (long*)arg;
     long* local_sum = new long;
 
 //    std::cout << "consumer tid: " << get_tid() << std::endl;
@@ -91,21 +96,23 @@ void* consumer_routine(void* arg) {
     std::cout << "consumer " <<  get_tid() <<" - signal ready" << std::endl;
     pthread_cond_broadcast(&my_cond_consumer_is_ready);
 
-    while(true) {
+    while(!p->done_flag) {
         std::cout << "consumer " <<  get_tid() <<" - try lock mutex" << std::endl;
         pthread_mutex_lock(&my_mutex);
-        while (*my_num == -1) {
+        while (p->empty_flag) {
             pthread_cond_signal(&my_cond_empty);
             std::cout << "consumer " <<  get_tid() <<" - empty signal sent" << std::endl;
             std::cout << "consumer " <<  get_tid() <<" - wait cond full" << std::endl;
             pthread_cond_wait(&my_cond_full, &my_mutex);
+
+            if (p->done_flag) break;
         }
 //        pthread_cond_wait(&my_cond_full, &my_mutex);
 //        timespec s = {0, max_ms_consumer_sleep * 1000000};
 //        while (pthread_cond_timedwait(&my_cond_full, &my_mutex, &s) && *my_num == -1);
 //        while (pthread_cond_wait(&my_cond_full, &my_mutex) && *my_num == -1);
-        *local_sum += *my_num;
-        *my_num = -1;
+        *local_sum += p->my_num;
+        p->empty_flag = true;
         std::cout << "tid " << get_tid() << ": psum " << *local_sum << std::endl;
 //        pthread_cond_signal(&my_cond_empty);
 //        std::cout << "consumer - empty signal sent" << std::endl;
@@ -113,6 +120,8 @@ void* consumer_routine(void* arg) {
         pthread_mutex_unlock(&my_mutex);
         usleep(1000 * max_ms_consumer_sleep);  // TODO add random
     }
+
+    std::cout << "CONSUMER DONE" << std::endl;
 
     return local_sum;
 }
@@ -131,16 +140,16 @@ void* consumer_interruptor_routine(void* arg) {
         int random_thread_to_cancel = 0;
 //        std::cout << "interruptor - cancelling " << random_thread_to_cancel << std::endl;
 //        pthread_cancel(random_thread_to_cancel);
+        pthread_testcancel();
     }
 }
 
 int run_threads() {
     // start N threads and wait until they're done
     // return aggregated sum of values
-    long* my_num = new long;  // shared between threads
+//    long* my_num = new long;  // shared between threads
     int ret;
-
-    *my_num = -1;
+    struct thread_params p;
 
     pthread_key_create(&cur_tid, NULL);
     my_pthreads_ids = new pthread_t[3 + n_threads];
@@ -149,16 +158,16 @@ int run_threads() {
 
     std::cout << "running threads" << std::endl;
 //    pthread_t producer_ptid, interruptor_ptid;
-    int producer_created = pthread_create(&my_pthreads_ids[1], NULL, producer_routine, my_num);
+    int producer_created = pthread_create(&my_pthreads_ids[1], NULL, producer_routine, &p);
     int interruptor_created = pthread_create(&my_pthreads_ids[2], NULL, consumer_interruptor_routine, NULL);
-    std::cout << "producer ptid " << &my_pthreads_ids[1] << std::endl;
-    std::cout << "interruptor_ptid " << &my_pthreads_ids[2] << std::endl;
+    std::cout << "producer ptid " << my_pthreads_ids[1] << std::endl;
+    std::cout << "interruptor_ptid " << my_pthreads_ids[2] << std::endl;
 
     std::cout << "3 x tid: " << get_tid() << " - " << get_tid() << " - " << get_tid() << std::endl;
 
 //    pthread_t* consumer_threads_ids = new pthread_t[n_threads];
     for (int i=0;i<n_threads;i++) {
-        int c = pthread_create(&my_pthreads_ids[3 + i], NULL, consumer_routine, my_num);
+        int c = pthread_create(&my_pthreads_ids[3 + i], NULL, consumer_routine, &p);
     }
 
     std::cout << "3 x tid: " << get_tid() << " - " << get_tid() << " - " << get_tid() << std::endl;
@@ -166,13 +175,22 @@ int run_threads() {
     long* consumers_results = new long[n_threads];
     for (int i=0;i<n_threads;i++) {
         // collect sums from each consumer
-        void* result_ptr = (void*)(consumers_results + i);
+//        void* result_ptr = (void*)(consumers_results + i);
+        void* result_ptr = new long;
         pthread_join(my_pthreads_ids[3 + i], &result_ptr);
+        consumers_results[i] = *(long*)result_ptr;
 //        std::cout << *(long*)result_ptr << std::endl;
     }
 
+    for (int i=0;i<n_threads;i++) {
+        std::cout << consumers_results[i] << " ";
+    }
+    std::cout << std::endl;
+
     pthread_join(my_pthreads_ids[1], NULL);
+    std::cout << "test 1" << std::endl;
     pthread_join(my_pthreads_ids[2], NULL);
+    std::cout << "test 2" << std::endl;
 //    if (ret) {
 //        errno = ret;
 //        perror("pthread_join");
