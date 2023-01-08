@@ -5,19 +5,27 @@
 #include <iterator>
 #include <pthread.h>
 #include <unistd.h>
+#include <atomic>
 
+int get_tid();
 
 pthread_t* my_pthreads_ids;
 bool debug = false;
 int n_threads;
 long max_ms_consumer_sleep;
-pthread_key_t tid;
+pthread_key_t cur_tid;
 
 pthread_mutex_t my_mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t my_cond_full = PTHREAD_COND_INITIALIZER,
                 my_cond_empty = PTHREAD_COND_INITIALIZER,
                 my_cond_consumer_is_ready = PTHREAD_COND_INITIALIZER;
 
+
+struct thread_params {
+    long my_buf;  // producer writes here, consumer reads
+    bool empty_flag = false;
+    bool done_flag = false;
+};
 
 void* producer_routine(void* arg) {
     // Wait for consumer to start
@@ -27,6 +35,8 @@ void* producer_routine(void* arg) {
     // read numbers from stdin
 //    std::vector<int> numbers;
     long* my_num = (long*)arg;
+
+//    std::cout << "producer tid: " << get_tid() << std::endl;
 
     std::cout << "producer - try block mutex" << std::endl;
     pthread_mutex_lock(&my_mutex);
@@ -75,17 +85,19 @@ void* consumer_routine(void* arg) {
     long* my_num = (long*)arg;
     long* local_sum = new long;
 
+//    std::cout << "consumer tid: " << get_tid() << std::endl;
+
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &last_state);
-    std::cout << "consumer - signal ready" << std::endl;
+    std::cout << "consumer " <<  get_tid() <<" - signal ready" << std::endl;
     pthread_cond_broadcast(&my_cond_consumer_is_ready);
 
     while(true) {
-        std::cout << "consumer - try lock mutex" << std::endl;
+        std::cout << "consumer " <<  get_tid() <<" - try lock mutex" << std::endl;
         pthread_mutex_lock(&my_mutex);
         while (*my_num == -1) {
             pthread_cond_signal(&my_cond_empty);
-            std::cout << "consumer - empty signal sent" << std::endl;
-            std::cout << "consumer - wait cond full" << std::endl;
+            std::cout << "consumer " <<  get_tid() <<" - empty signal sent" << std::endl;
+            std::cout << "consumer " <<  get_tid() <<" - wait cond full" << std::endl;
             pthread_cond_wait(&my_cond_full, &my_mutex);
         }
 //        pthread_cond_wait(&my_cond_full, &my_mutex);
@@ -94,10 +106,10 @@ void* consumer_routine(void* arg) {
 //        while (pthread_cond_wait(&my_cond_full, &my_mutex) && *my_num == -1);
         *local_sum += *my_num;
         *my_num = -1;
-        std::cout << *local_sum << std::endl;
+        std::cout << "tid " << get_tid() << ": psum " << *local_sum << std::endl;
 //        pthread_cond_signal(&my_cond_empty);
 //        std::cout << "consumer - empty signal sent" << std::endl;
-        std::cout << "consumer - unlocking mutex, sleeping " << 1000 * max_ms_consumer_sleep << std::endl;
+        std::cout << "consumer " <<  get_tid() <<" - unlocking mutex, sleeping " << 1000 * max_ms_consumer_sleep << std::endl;
         pthread_mutex_unlock(&my_mutex);
         usleep(1000 * max_ms_consumer_sleep);  // TODO add random
     }
@@ -130,28 +142,37 @@ int run_threads() {
 
     *my_num = -1;
 
-    std::cout << "running threads" << std::endl;
-    pthread_t producer_ptid, interruptor_ptid;
-    int producer_created = pthread_create(&producer_ptid, NULL, producer_routine, my_num);
-    int interruptor_created = pthread_create(&interruptor_ptid, NULL, consumer_interruptor_routine, NULL);
-    std::cout << "producer ptid " << producer_ptid << std::endl;
-    std::cout << "interruptor_ptid " << interruptor_ptid << std::endl;
+    pthread_key_create(&cur_tid, NULL);
+    my_pthreads_ids = new pthread_t[3 + n_threads];
 
-    pthread_t* consumer_threads_ids = new pthread_t[n_threads];
+    std::cout << "3 x tid: " << get_tid() << " - " << get_tid() << " - " << get_tid() << std::endl;
+
+    std::cout << "running threads" << std::endl;
+//    pthread_t producer_ptid, interruptor_ptid;
+    int producer_created = pthread_create(&my_pthreads_ids[1], NULL, producer_routine, my_num);
+    int interruptor_created = pthread_create(&my_pthreads_ids[2], NULL, consumer_interruptor_routine, NULL);
+    std::cout << "producer ptid " << &my_pthreads_ids[1] << std::endl;
+    std::cout << "interruptor_ptid " << &my_pthreads_ids[2] << std::endl;
+
+    std::cout << "3 x tid: " << get_tid() << " - " << get_tid() << " - " << get_tid() << std::endl;
+
+//    pthread_t* consumer_threads_ids = new pthread_t[n_threads];
     for (int i=0;i<n_threads;i++) {
-        int c = pthread_create(consumer_threads_ids + i, NULL, consumer_routine, my_num);
+        int c = pthread_create(&my_pthreads_ids[3 + i], NULL, consumer_routine, my_num);
     }
+
+    std::cout << "3 x tid: " << get_tid() << " - " << get_tid() << " - " << get_tid() << std::endl;
 
     long* consumers_results = new long[n_threads];
     for (int i=0;i<n_threads;i++) {
         // collect sums from each consumer
         void* result_ptr = (void*)(consumers_results + i);
-        pthread_join(*(consumer_threads_ids + i), &result_ptr);
-        std::cout << *(long*)result_ptr << std::endl;
+        pthread_join(my_pthreads_ids[3 + i], &result_ptr);
+//        std::cout << *(long*)result_ptr << std::endl;
     }
 
-    pthread_join(producer_ptid, NULL);
-    pthread_join(interruptor_ptid, NULL);
+    pthread_join(my_pthreads_ids[1], NULL);
+    pthread_join(my_pthreads_ids[2], NULL);
 //    if (ret) {
 //        errno = ret;
 //        perror("pthread_join");
@@ -163,9 +184,19 @@ int run_threads() {
 
 int get_tid() {
     // 1 to 3+N thread ID
-    struct abc {};
-    // TODO read about TLS and implement
-    return 0;
+//    static int thread_counter = 0;
+    static std::atomic<int> thread_counter = 0;
+    void* thread_id_ptr = pthread_getspecific(cur_tid);
+//    std::cout << "get_tid " << thread_id_ptr << std::endl;
+    if (thread_id_ptr == NULL) {
+        thread_counter.fetch_add(1);
+        pthread_setspecific(cur_tid, &thread_counter);
+        return thread_counter;
+    }
+
+//    std::cout << "debug tid " << *(int*)thread_id_ptr << " " << (int*)thread_id_ptr << " " << thread_id_ptr << std::endl;
+
+    return *(std::atomic<int>*)thread_id_ptr;
 }
 
 void parse_command_args(char** args) {
