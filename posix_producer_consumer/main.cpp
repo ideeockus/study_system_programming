@@ -28,11 +28,12 @@ void* producer_routine(void* arg) {
 //    std::vector<int> numbers;
     long* my_num = (long*)arg;
 
-    std::cout << "try block mutex" << std::endl;
+    std::cout << "producer - try block mutex" << std::endl;
     pthread_mutex_lock(&my_mutex);
+    std::cout << "producer - blocked mutex" << std::endl;
     std::cout << "producer - wait consumer ready" << std::endl;
     pthread_cond_wait(&my_cond_consumer_is_ready, &my_mutex);
-    pthread_mutex_unlock(&my_mutex);
+//    pthread_mutex_unlock(&my_mutex);
 
     std::cout << "Enter your numbers: " << std::endl;
     std::string input;
@@ -40,20 +41,26 @@ void* producer_routine(void* arg) {
 
     std::istringstream string_stream(input);
     for (long num; string_stream >> num;) {
-//        std::lock_guard<std::mutex> my_queue_lock_guard(my_mutex);
-        pthread_mutex_lock(&my_mutex);
-        std::cout << "producer - blocked mutex" << std::endl;
+//        while (*my_num != -1); // spinlock
+//        pthread_mutex_lock(&my_mutex);
         *my_num = num;
-        pthread_cond_signal(&my_cond_full);
+//        pthread_cond_signal(&my_cond_full);
         std::cout << "producer - full signal sent & waiting empty" << std::endl;
-        pthread_cond_wait(&my_cond_empty, &my_mutex);
+//        pthread_cond_wait(&my_cond_empty, &my_mutex);
+//        timespec s = {0, max_ms_consumer_sleep * 1000000};
+//        while (pthread_cond_timedwait(&my_cond_empty, &my_mutex, &s) && *my_num != -1)
+        while (*my_num != -1)
+        {
+//            std::cout << *my_num << std::endl;
+            pthread_cond_signal(&my_cond_full);
+            pthread_cond_wait(&my_cond_empty, &my_mutex);
+        }
         std::cout << "producer - got signal empty" << std::endl;
-//        while (pthread_cond_wait(&my_cond_empty, &my_mutex) && *my_num == -1);
-        std::cout << "producer - unlocking mutex" << std::endl;
-        pthread_mutex_unlock(&my_mutex);
 
-//        numbers.push_back(num);
+//        pthread_mutex_unlock(&my_mutex);
     }
+    std::cout << "producer - unlocking mutex" << std::endl;
+    pthread_mutex_unlock(&my_mutex);
 
     // TODO kill interruptor thread
 
@@ -69,23 +76,30 @@ void* consumer_routine(void* arg) {
     long* local_sum = new long;
 
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &last_state);
+    std::cout << "consumer - signal ready" << std::endl;
     pthread_cond_broadcast(&my_cond_consumer_is_ready);
 
     while(true) {
         std::cout << "consumer - try lock mutex" << std::endl;
         pthread_mutex_lock(&my_mutex);
-        std::cout << "consumer - wait cond full" << std::endl;
-        pthread_cond_wait(&my_cond_full, &my_mutex);
-
+        while (*my_num == -1) {
+            pthread_cond_signal(&my_cond_empty);
+            std::cout << "consumer - empty signal sent" << std::endl;
+            std::cout << "consumer - wait cond full" << std::endl;
+            pthread_cond_wait(&my_cond_full, &my_mutex);
+        }
+//        pthread_cond_wait(&my_cond_full, &my_mutex);
+//        timespec s = {0, max_ms_consumer_sleep * 1000000};
+//        while (pthread_cond_timedwait(&my_cond_full, &my_mutex, &s) && *my_num == -1);
+//        while (pthread_cond_wait(&my_cond_full, &my_mutex) && *my_num == -1);
         *local_sum += *my_num;
         *my_num = -1;
-
-        pthread_cond_signal(&my_cond_empty);
         std::cout << *local_sum << std::endl;
-        std::cout << "consumer - empty signal sent, unlocking mutex, sleeping " << 1000 * max_ms_consumer_sleep << std::endl;
+//        pthread_cond_signal(&my_cond_empty);
+//        std::cout << "consumer - empty signal sent" << std::endl;
+        std::cout << "consumer - unlocking mutex, sleeping " << 1000 * max_ms_consumer_sleep << std::endl;
         pthread_mutex_unlock(&my_mutex);
         usleep(1000 * max_ms_consumer_sleep);  // TODO add random
-
     }
 
     return local_sum;
@@ -113,6 +127,8 @@ int run_threads() {
     // return aggregated sum of values
     long* my_num = new long;  // shared between threads
     int ret;
+
+    *my_num = -1;
 
     std::cout << "running threads" << std::endl;
     pthread_t producer_ptid, interruptor_ptid;
